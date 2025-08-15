@@ -230,3 +230,28 @@ export function getNetwork({ mastra, networkId, resourceId, runtimeContext }: Ge
     runtimeContext,
   }) as AbstractAgent;
 }
+
+export function setTelemetryMetadata(
+  runtimeContext: RuntimeContext,
+  metadata: Record<string, any>
+): void {
+  runtimeContext.set("telemetry-metadata", metadata);
+}
+
+export function addTelemetryField(
+  runtimeContext: RuntimeContext,
+  key: string,
+  value: any
+): void {
+  const existingMetadata = runtimeContext.get("telemetry-metadata") || {};
+  runtimeContext.set("telemetry-metadata", {
+    ...existingMetadata,
+    [key]: value
+  });
+}
+
+export function getTelemetryMetadata(
+  runtimeContext: RuntimeContext
+): Record<string, any> | undefined {
+  return runtimeContext.get("telemetry-metadata");
+}
