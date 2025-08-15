@@ -262,6 +262,15 @@ export class MastraAgent extends AbstractAgent {
     const convertedMessages = convertAGUIMessagesToMastra(messages);
     const runtimeContext = this.runtimeContext;
 
+    // Add telemetry to forwardedProps if available in RuntimeContext
+    if (!forwardedProps?.telemetry && this.runtimeContext) {
+      const telemetryMetadata = this.runtimeContext.get("telemetry-metadata");
+      if (telemetryMetadata) {
+        forwardedProps = forwardedProps || {};
+        forwardedProps.telemetry = { metadata: telemetryMetadata, isEnabled: true };
+      }
+    }
+
     if (this.isLocalMastraAgent(this.agent)) {
       // Local agent - use the agent's stream method directly
       try {
@@ -271,6 +280,7 @@ export class MastraAgent extends AbstractAgent {
           runId,
           clientTools,
           runtimeContext,
+          ...forwardedProps,
         });
 
         // For local agents, the response should already be a stream
@@ -320,6 +330,7 @@ export class MastraAgent extends AbstractAgent {
           runId,
           messages: convertedMessages,
           clientTools,
+          ...forwardedProps,
         });
 
         // Remote agents should have a processDataStream method
