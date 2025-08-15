@@ -32,6 +32,16 @@ import {
   getNetwork,
 } from "./utils";
 
+export interface MastraTelemetryConfig {
+  metadata?: Record<string, any>;
+  isEnabled?: boolean;
+}
+
+export interface MastraForwardedProps {
+  telemetry?: MastraTelemetryConfig;
+  [key: string]: any;
+}
+
 export interface MastraAgentConfig extends AgentConfig {
   agent: LocalMastraAgent | RemoteMastraAgent;
   resourceId?: string;
@@ -227,7 +237,7 @@ export class MastraAgent extends AbstractAgent {
    * @returns The stream of the mastra agent.
    */
   private async streamMastraAgent(
-    { threadId, runId, messages, tools }: RunAgentInput,
+    { threadId, runId, messages, tools, forwardedProps }: RunAgentInput,
     {
       onTextPart,
       onFinishMessagePart,
