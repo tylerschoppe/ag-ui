@@ -89,7 +89,7 @@ export class MastraAgent extends AbstractAgent {
             if (stateSnapshot.threadsExist && stateSnapshot.messages.length > 0) {
               const messagesSnapshotEvent: MessagesSnapshotEvent = {
                 type: EventType.MESSAGES_SNAPSHOT,
-                messages: stateSnapshot.messages,
+                messages: stateSnapshot.messages as Message[],
               };
               subscriber.next(messagesSnapshotEvent);
 
@@ -285,7 +285,7 @@ export class MastraAgent extends AbstractAgent {
         return messages;
       }
 
-      const existingMessages = await thread.getMessages({ limit: 1000 });
+      const existingMessages = await (thread as any).getMessages({ limit: 1000 });
       const existingIds = new Set(existingMessages.map((m: any) => m.id));
 
       const newMessages = messages.filter((msg) => !existingIds.has(msg.id));

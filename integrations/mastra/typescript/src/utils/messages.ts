@@ -7,6 +7,7 @@ export interface AGUIMessage {
   content: string;
   toolCalls?: Array<{
     id: string;
+    type: "function";
     function: {
       name: string;
       arguments: string;
@@ -45,6 +46,7 @@ export function mastraMsgToAGUI(mastraMessage: MastraMemoryMessage): AGUIMessage
           if (!toolCalls) toolCalls = [];
           toolCalls.push({
             id: part.toolCallId || part.id || `tool-${Date.now()}`,
+            type: "function",
             function: {
               name: part.toolName || part.name || "unknown",
               arguments: JSON.stringify(part.args || part.arguments || {}),

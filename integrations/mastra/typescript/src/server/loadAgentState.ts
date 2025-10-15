@@ -55,7 +55,7 @@ export async function loadAgentState(
 
     let mastraMessages: MastraMemoryMessage[] = [];
     try {
-      mastraMessages = await thread.getMessages({ limit });
+      mastraMessages = await (thread as any).getMessages({ limit });
       console.info(`[loadAgentState] Loaded ${mastraMessages.length} messages for thread ${threadId}`);
     } catch (error) {
       console.error(`[loadAgentState] Failed to fetch messages for thread ${threadId}:`, error);
