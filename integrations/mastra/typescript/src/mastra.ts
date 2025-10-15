@@ -1,6 +1,7 @@
 import type {
   AgentConfig,
   BaseEvent,
+  MessagesSnapshotEvent,
   RunAgentInput,
   RunFinishedEvent,
   RunStartedEvent,
@@ -30,6 +31,7 @@ import {
   GetNetworkOptions,
   getNetwork,
 } from "./utils";
+import { loadAgentState } from "./server/loadAgentState.js";
 
 export interface MastraAgentConfig extends AgentConfig {
   agent: LocalMastraAgent | RemoteMastraAgent;
@@ -70,6 +72,37 @@ export class MastraAgent extends AbstractAgent {
         };
 
         subscriber.next(runStartedEvent);
+
+        if (input.threadId && this.isLocalMastraAgent(this.agent)) {
+          try {
+            const stateSnapshot = await loadAgentState(
+              {
+                agentId: this.agentId!,
+                resourceId: this.resourceId,
+                threadId: input.threadId,
+                limit: 100,
+              },
+              this.agent
+            );
+
+            if (stateSnapshot.threadsExist && stateSnapshot.messages.length > 0) {
+              const messagesSnapshotEvent: MessagesSnapshotEvent = {
+                type: EventType.MESSAGES_SNAPSHOT,
+                messages: stateSnapshot.messages,
+              };
+              subscriber.next(messagesSnapshotEvent);
+
+              console.info(
+                `[MastraAgent] Loaded ${stateSnapshot.messages.length} historical messages for thread ${input.threadId}`
+              );
+            }
+          } catch (error) {
+            console.error(
+              `[MastraAgent] Failed to load thread history for ${input.threadId}:`,
+              error
+            );
+          }
+        }
 
         // Handle local agent memory management (from Mastra implementation)
         if (this.isLocalMastraAgent(this.agent)) {
