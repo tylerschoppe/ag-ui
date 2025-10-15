@@ -97,6 +97,18 @@ export class MastraAgent extends AbstractAgent {
                 `[MastraAgent] Loaded ${stateSnapshot.messages.length} historical messages for thread ${input.threadId}`
               );
             }
+
+            if (stateSnapshot.workingMemory && Object.keys(stateSnapshot.workingMemory).length > 0) {
+              const stateSnapshotEvent: StateSnapshotEvent = {
+                type: EventType.STATE_SNAPSHOT,
+                snapshot: stateSnapshot.workingMemory,
+              };
+              subscriber.next(stateSnapshotEvent);
+
+              console.info(
+                `[MastraAgent] Restored working memory for thread ${input.threadId}`
+              );
+            }
           } catch (error) {
             console.error(
               `[MastraAgent] Failed to load thread history for ${input.threadId}:`,
