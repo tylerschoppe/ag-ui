@@ -1,6 +1,7 @@
 import type {
   AgentConfig,
   BaseEvent,
+  Message,
   MessagesSnapshotEvent,
   RunAgentInput,
   RunFinishedEvent,
@@ -252,6 +253,54 @@ export class MastraAgent extends AbstractAgent {
     return "getMemory" in agent;
   }
 
+  private async getNewMessages({
+    threadId,
+    messages,
+  }: {
+    threadId?: string;
+    messages: Message[];
+  }): Promise<Message[]> {
+    if (!threadId) {
+      return messages;
+    }
+
+    if (!this.isLocalMastraAgent(this.agent)) {
+      return messages;
+    }
+
+    try {
+      const memory = await this.agent.getMemory();
+      if (!memory) {
+        return messages;
+      }
+
+      let thread;
+      try {
+        thread = await memory.getThreadById({ threadId });
+      } catch (error) {
+        return messages;
+      }
+
+      if (!thread) {
+        return messages;
+      }
+
+      const existingMessages = await thread.getMessages({ limit: 1000 });
+      const existingIds = new Set(existingMessages.map((m: any) => m.id));
+
+      const newMessages = messages.filter((msg) => !existingIds.has(msg.id));
+
+      console.info(
+        `[MastraAgent] Filtered ${messages.length} input messages to ${newMessages.length} new messages for thread ${threadId}`
+      );
+
+      return newMessages;
+    } catch (error) {
+      console.error(`[MastraAgent] Failed to filter messages, sending all:`, error);
+      return messages;
+    }
+  }
+
   /**
    * Streams in process or remote mastra agent.
    * @param input - The input for the mastra agent.
@@ -282,7 +331,8 @@ export class MastraAgent extends AbstractAgent {
     );
     const resourceId = this.resourceId ?? threadId;
 
-    const convertedMessages = convertAGUIMessagesToMastra(messages);
+    const messagesToSend = await this.getNewMessages({ threadId, messages });
+    const convertedMessages = convertAGUIMessagesToMastra(messagesToSend);
     this.runtimeContext?.set("ag-ui", { context: inputContext });
     const runtimeContext = this.runtimeContext;
 
