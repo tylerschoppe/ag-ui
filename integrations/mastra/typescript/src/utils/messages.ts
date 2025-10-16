@@ -96,3 +96,52 @@ export function mastraMsgsToAGUI(mastraMessages: MastraMemoryMessage[]): AGUIMes
 
   return aguiMessages;
 }
+
+/**
+ * LangChain message format (what CopilotKit expects)
+ */
+export interface LangChainMessage {
+  id?: string;
+  type: "human" | "ai" | "system" | "tool";
+  content: string | Array<any>;
+  tool_calls?: Array<{
+    id: string;
+    name: string;
+    args: Record<string, any>;
+  }>;
+  tool_call_id?: string;
+}
+
+/**
+ * Convert AG-UI messages to LangChain format for CopilotKit
+ *
+ * CopilotKit's runtime expects LangChain-formatted messages with:
+ * - type: "human" | "ai" | "system" | "tool"
+ * - content: string or array
+ * - tool_calls: array of {id, name, args}
+ */
+export function aguiMessagesToLangChain(messages: AGUIMessage[]): LangChainMessage[] {
+  return messages.map((msg) => {
+    const langChainMsg: LangChainMessage = {
+      id: msg.id,
+      type: msg.role === "user" ? "human" : msg.role === "assistant" ? "ai" : msg.role as any,
+      content: msg.content || "",
+    };
+
+    // AI messages must always have tool_calls array (even if empty)
+    if (msg.role === "assistant") {
+      langChainMsg.tool_calls = (msg.toolCalls || []).map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        args: JSON.parse(tc.function.arguments),
+      }));
+    }
+
+    // Add tool_call_id for tool messages
+    if (msg.toolCallId) {
+      langChainMsg.tool_call_id = msg.toolCallId;
+    }
+
+    return langChainMsg;
+  });
+}

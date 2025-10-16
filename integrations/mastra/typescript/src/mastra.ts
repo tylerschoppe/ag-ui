@@ -53,12 +53,57 @@ export class MastraAgent extends AbstractAgent {
   agent: LocalMastraAgent | RemoteMastraAgent;
   resourceId?: string;
   runtimeContext?: RuntimeContext;
+  client?: {
+    threads: {
+      getState(threadId: string): Promise<{ values: Record<string, any> }>;
+    };
+  };
 
   constructor({ agent, resourceId, runtimeContext, ...rest }: MastraAgentConfig) {
     super(rest);
     this.agent = agent;
     this.resourceId = resourceId;
     this.runtimeContext = runtimeContext ?? new RuntimeContext();
+
+    // Create LangGraph-compatible client interface for CopilotKit
+    if (this.isLocalMastraAgent(agent)) {
+      this.client = {
+        threads: {
+          getState: async (threadId: string) => {
+            console.info(`[MastraAgent.client] Loading state for thread ${threadId}`);
+
+            const stateSnapshot = await loadAgentState(
+              {
+                agentId: this.agentId!,
+                resourceId: this.resourceId || this.agentId!,
+                threadId,
+                limit: 100,
+              },
+              agent
+            );
+
+            console.info(`[MastraAgent.client] State loaded: threadsExist=${stateSnapshot.threadsExist}, messages=${stateSnapshot.messages.length}`);
+
+            // Convert AG-UI messages to LangChain format for CopilotKit
+            const { aguiMessagesToLangChain } = await import("./utils/messages.js");
+            const langChainMessages = aguiMessagesToLangChain(stateSnapshot.messages);
+
+            console.info(`[MastraAgent.client] Converted to LangChain format:`, JSON.stringify(langChainMessages).substring(0, 200));
+
+            const returnValue = {
+              values: {
+                messages: langChainMessages,
+                ...stateSnapshot.workingMemory,
+              },
+            };
+
+            console.info(`[MastraAgent.client] Return value:`, JSON.stringify(returnValue).substring(0, 500));
+
+            return returnValue;
+          },
+        },
+      };
+    }
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -76,6 +121,10 @@ export class MastraAgent extends AbstractAgent {
 
         if (input.threadId && this.isLocalMastraAgent(this.agent)) {
           try {
+            console.info(
+              `[MastraAgent] Loading thread state for threadId: ${input.threadId}, resourceId: ${this.resourceId}`
+            );
+
             const stateSnapshot = await loadAgentState(
               {
                 agentId: this.agentId!,
@@ -84,6 +133,10 @@ export class MastraAgent extends AbstractAgent {
                 limit: 100,
               },
               this.agent
+            );
+
+            console.info(
+              `[MastraAgent] loadAgentState result: threadsExist=${stateSnapshot.threadsExist}, messages=${stateSnapshot.messages.length}, hasWorkingMemory=${!!stateSnapshot.workingMemory}`
             );
 
             if (stateSnapshot.threadsExist && stateSnapshot.messages.length > 0) {
@@ -95,6 +148,10 @@ export class MastraAgent extends AbstractAgent {
 
               console.info(
                 `[MastraAgent] Loaded ${stateSnapshot.messages.length} historical messages for thread ${input.threadId}`
+              );
+            } else {
+              console.info(
+                `[MastraAgent] No historical messages to load for thread ${input.threadId}`
               );
             }
 
@@ -232,6 +289,43 @@ export class MastraAgent extends AbstractAgent {
                         subscriber.next(stateSnapshotEvent);
                       }
                     }
+
+                    // Emit MESSAGES_SNAPSHOT with complete message list (matches LangGraph pattern)
+                    try {
+                      console.info(
+                        `[MastraAgent] Querying final messages for thread ${input.threadId} with resourceId: ${this.resourceId}`
+                      );
+
+                      const { uiMessages } = await memory.query({
+                        threadId: input.threadId,
+                        resourceId: this.resourceId,
+                      });
+
+                      console.info(
+                        `[MastraAgent] Query returned ${uiMessages?.length || 0} uiMessages`
+                      );
+
+                      if (uiMessages && uiMessages.length > 0) {
+                        const { mastraMsgsToAGUI } = await import("./utils/messages.js");
+                        const aguiMessages = mastraMsgsToAGUI(uiMessages as any);
+
+                        const messagesSnapshotEvent: MessagesSnapshotEvent = {
+                          type: EventType.MESSAGES_SNAPSHOT,
+                          messages: aguiMessages as Message[],
+                        };
+                        subscriber.next(messagesSnapshotEvent);
+
+                        console.info(
+                          `[MastraAgent] Emitted final message snapshot with ${aguiMessages.length} messages for thread ${input.threadId}`
+                        );
+                      } else {
+                        console.info(
+                          `[MastraAgent] No messages to emit in final snapshot for thread ${input.threadId}`
+                        );
+                      }
+                    } catch (error) {
+                      console.error(`[MastraAgent] Failed to emit final message snapshot:`, error);
+                    }
                   }
                 } catch (error) {
                   console.error("Error sending state snapshot", error);
@@ -273,42 +367,52 @@ export class MastraAgent extends AbstractAgent {
     messages: Message[];
   }): Promise<Message[]> {
     if (!threadId) {
+      console.info(`[MastraAgent.getNewMessages] No threadId, returning all ${messages.length} messages`);
       return messages;
     }
 
     if (!this.isLocalMastraAgent(this.agent)) {
+      console.info(`[MastraAgent.getNewMessages] Remote agent, returning all ${messages.length} messages`);
       return messages;
     }
 
     try {
       const memory = await this.agent.getMemory();
       if (!memory) {
+        console.info(`[MastraAgent.getNewMessages] No memory, returning all ${messages.length} messages`);
         return messages;
       }
 
-      let thread;
-      try {
-        thread = await memory.getThreadById({ threadId });
-      } catch (error) {
-        return messages;
-      }
+      console.info(
+        `[MastraAgent.getNewMessages] Querying existing messages for thread ${threadId} with resourceId: ${this.resourceId}`
+      );
 
-      if (!thread) {
-        return messages;
-      }
+      const { uiMessages: existingMessages } = await memory.query({
+        threadId,
+        resourceId: this.resourceId,
+      });
 
-      const existingMessages = await (thread as any).getMessages({ limit: 1000 });
+      console.info(
+        `[MastraAgent.getNewMessages] Found ${existingMessages?.length || 0} existing messages in thread`
+      );
+
       const existingIds = new Set(existingMessages.map((m: any) => m.id));
 
       const newMessages = messages.filter((msg) => !existingIds.has(msg.id));
 
       console.info(
-        `[MastraAgent] Filtered ${messages.length} input messages to ${newMessages.length} new messages for thread ${threadId}`
+        `[MastraAgent.getNewMessages] Filtered ${messages.length} input messages to ${newMessages.length} new messages for thread ${threadId}`
       );
+
+      if (messages.length > 0 && newMessages.length === 0) {
+        console.warn(
+          `[MastraAgent.getNewMessages] All ${messages.length} messages already exist in thread - this may indicate duplicate message IDs`
+        );
+      }
 
       return newMessages;
     } catch (error) {
-      console.error(`[MastraAgent] Failed to filter messages, sending all:`, error);
+      console.error(`[MastraAgent.getNewMessages] Failed to filter messages, sending all:`, error);
       return messages;
     }
   }
@@ -341,7 +445,14 @@ export class MastraAgent extends AbstractAgent {
       },
       {} as Record<string, any>,
     );
-    const resourceId = this.resourceId ?? threadId;
+    // Ensure we have a resourceId - it MUST be provided for memory to work
+    // According to Mastra docs: "agents won't store or recall information unless both thread and resource are provided"
+    const resourceId = this.resourceId;
+    if (!resourceId) {
+      console.warn(
+        `[MastraAgent] No resourceId configured! Memory will not persist. ThreadId: ${threadId}`
+      );
+    }
 
     const messagesToSend = await this.getNewMessages({ threadId, messages });
     const convertedMessages = convertAGUIMessagesToMastra(messagesToSend);
