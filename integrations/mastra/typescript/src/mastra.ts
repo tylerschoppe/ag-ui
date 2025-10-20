@@ -72,10 +72,18 @@ export class MastraAgent extends AbstractAgent {
           getState: async (threadId: string) => {
             console.info(`[MastraAgent.client] Loading state for thread ${threadId}`);
 
+            if (!this.resourceId) {
+              console.warn(
+                `[MastraAgent.client] Cannot load thread state without resourceId. ` +
+                `Agent: ${this.agentId}, Thread: ${threadId}. Returning empty state.`
+              );
+              return { values: { messages: [] } };
+            }
+
             const stateSnapshot = await loadAgentState(
               {
                 agentId: this.agentId!,
-                resourceId: this.resourceId || this.agentId!,
+                resourceId: this.resourceId,
                 threadId,
                 limit: 100,
               },
@@ -120,57 +128,64 @@ export class MastraAgent extends AbstractAgent {
         subscriber.next(runStartedEvent);
 
         if (input.threadId && this.isLocalMastraAgent(this.agent)) {
-          try {
-            console.info(
-              `[MastraAgent] Loading thread state for threadId: ${input.threadId}, resourceId: ${this.resourceId}`
+          if (!this.resourceId) {
+            console.warn(
+              `[MastraAgent] Cannot load thread state without resourceId. ` +
+              `Agent: ${this.agentId}, Thread: ${input.threadId}. Skipping state hydration.`
             );
-
-            const stateSnapshot = await loadAgentState(
-              {
-                agentId: this.agentId!,
-                resourceId: this.resourceId,
-                threadId: input.threadId,
-                limit: 100,
-              },
-              this.agent
-            );
-
-            console.info(
-              `[MastraAgent] loadAgentState result: threadsExist=${stateSnapshot.threadsExist}, messages=${stateSnapshot.messages.length}, hasWorkingMemory=${!!stateSnapshot.workingMemory}`
-            );
-
-            if (stateSnapshot.threadsExist && stateSnapshot.messages.length > 0) {
-              const messagesSnapshotEvent: MessagesSnapshotEvent = {
-                type: EventType.MESSAGES_SNAPSHOT,
-                messages: stateSnapshot.messages as Message[],
-              };
-              subscriber.next(messagesSnapshotEvent);
-
+          } else {
+            try {
               console.info(
-                `[MastraAgent] Loaded ${stateSnapshot.messages.length} historical messages for thread ${input.threadId}`
+                `[MastraAgent] Loading thread state for threadId: ${input.threadId}, resourceId: ${this.resourceId}`
               );
-            } else {
+
+              const stateSnapshot = await loadAgentState(
+                {
+                  agentId: this.agentId!,
+                  resourceId: this.resourceId,
+                  threadId: input.threadId,
+                  limit: 100,
+                },
+                this.agent
+              );
+
               console.info(
-                `[MastraAgent] No historical messages to load for thread ${input.threadId}`
+                `[MastraAgent] loadAgentState result: threadsExist=${stateSnapshot.threadsExist}, messages=${stateSnapshot.messages.length}, hasWorkingMemory=${!!stateSnapshot.workingMemory}`
+              );
+
+              if (stateSnapshot.threadsExist && stateSnapshot.messages.length > 0) {
+                const messagesSnapshotEvent: MessagesSnapshotEvent = {
+                  type: EventType.MESSAGES_SNAPSHOT,
+                  messages: stateSnapshot.messages as Message[],
+                };
+                subscriber.next(messagesSnapshotEvent);
+
+                console.info(
+                  `[MastraAgent] Loaded ${stateSnapshot.messages.length} historical messages for thread ${input.threadId}`
+                );
+              } else {
+                console.info(
+                  `[MastraAgent] No historical messages to load for thread ${input.threadId}`
+                );
+              }
+
+              if (stateSnapshot.workingMemory && Object.keys(stateSnapshot.workingMemory).length > 0) {
+                const stateSnapshotEvent: StateSnapshotEvent = {
+                  type: EventType.STATE_SNAPSHOT,
+                  snapshot: stateSnapshot.workingMemory,
+                };
+                subscriber.next(stateSnapshotEvent);
+
+                console.info(
+                  `[MastraAgent] Restored working memory for thread ${input.threadId}`
+                );
+              }
+            } catch (error) {
+              console.error(
+                `[MastraAgent] Failed to load thread history for ${input.threadId}:`,
+                error
               );
             }
-
-            if (stateSnapshot.workingMemory && Object.keys(stateSnapshot.workingMemory).length > 0) {
-              const stateSnapshotEvent: StateSnapshotEvent = {
-                type: EventType.STATE_SNAPSHOT,
-                snapshot: stateSnapshot.workingMemory,
-              };
-              subscriber.next(stateSnapshotEvent);
-
-              console.info(
-                `[MastraAgent] Restored working memory for thread ${input.threadId}`
-              );
-            }
-          } catch (error) {
-            console.error(
-              `[MastraAgent] Failed to load thread history for ${input.threadId}:`,
-              error
-            );
           }
         }
 
